@@ -16,7 +16,7 @@ cal add(g:ctrlp_ext_vars, {
 	\ 'lname': 'tags',
 	\ 'sname': 'tag',
 	\ 'enter': 'ctrlp#tag#enter()',
-	\ 'type': 'tabs',
+	\ 'type': 'tab1',
 	\ })
 
 let s:id = g:ctrlp_builtins + len(g:ctrlp_ext_vars)
@@ -30,8 +30,7 @@ fu! s:findcount(tag, file, addr)
 	endi
 
 	" filter by filename
-	let find_fname = escape(fnamemodify(simplify(a:file), ':s?^\(\.\.[/\\]\)*??'), '^$.*~\') . '$'
-	let fnm = filter(copy(list), 'fnamemodify(v:val["filename"], ":p") =~ "'.find_fname.'"')
+	let fnm = filter(copy(list), 'fnamemodify(v:val["filename"], ":p") == "'.fnamemodify(a:file, ':p').'"')
 	if len(fnm) == 1
 		retu fnm[0].id
 	endi
@@ -52,10 +51,6 @@ fu! s:findcount(tag, file, addr)
 	" NB in the usual case we do not get beyond here. If 2+ tags have the
 	" same file & cmd, then only optional fields (kind etc.) can differentiate
 	" them but they will both match to the first occurence of cmd when using :ta.
-	"
-	" Alternately, 2+ tags have the same command and different filenames, both
-	" having a:file as suffix. This can probably only be solved using absolute
-	" paths in the CtrlPTag() display.
 	"
 	" Finally we might have a mismatch in file/cmd, but that should not happen (?)
 	if len(cmd) > 1
@@ -106,8 +101,37 @@ endf
 
 fu! s:formattag(line, tagdir)
 	" parse string
-	let [tag, filename; command] = split(a:line, "\t")
-	retu join([tag, fnamemodify((filename[0] != '/' ? a:tagdir . '/' : '') . filename, ':p:~:.')] + command, "\t")
+	let [tag, filename, cmd; fields] = split(a:line, "\t")
+
+	" get prettier filename
+	let filename = fnamemodify((filename[0] != '/' ? a:tagdir . '/' : '') . filename, ':p:~:.')
+
+	" maybe there were tabs in cmd? the cmd ends with ;" (or EOL) so repair it
+	wh cmd[-2:] != ';"' && len(fields)
+		let cmd .= "\t" . remove(fields, 0)
+	endw
+
+	if cmd[-2:] == ';"'
+		let cmd = cmd[:-3]
+	en
+
+	" extract kind: field. Optimise usual case, otherwise search through array
+	if len(fields) > 0 && len(fields[0]) == 1
+		let kind = remove(fields, 0)
+	el
+		let kind = '?'
+		let p = 0
+		for f in fields
+			if len(f) == 1
+				let kind = remove(fields, p)
+			elsei f[:5] == 'kind:'
+				let kind = f[6] " initial only
+			el
+				let p += 1
+			en
+		endfo
+	en
+	retu join([kind, tag, join(fields, ', '), filename, cmd], "\t")
 endf
 
 fu! s:syntax()
@@ -115,26 +139,23 @@ fu! s:syntax()
 		cal ctrlp#hicheck('CtrlPTagComment',  'Comment')
 		cal ctrlp#hicheck('CtrlPTagName',     'Identifier')
 		cal ctrlp#hicheck('CtrlPTagPath',     'PreProc')
-		cal ctrlp#hicheck('CtrlPTagDir',      'PreProc')
-		cal ctrlp#hicheck('CtrlPTagLine',     'Identifier')
-		cal ctrlp#hicheck('CtrlPTagSlash',    'Conceal')
+		cal ctrlp#hicheck('CtrlPTagHide',     'Conceal')
 		cal ctrlp#hicheck('CtrlPTagKind',     'Special')
 		cal ctrlp#hicheck('CtrlPTagField',    'Constant')
 		cal ctrlp#hicheck('CtrlPTagContent',  'Statement')
 
-		sy match  CtrlPTagPrompt               '^>'        nextgroup=CtrlPTagName
-		sy match  CtrlPTagName                 '\s[^\t]\+'ms=s+1        nextgroup=CtrlPTagPath
-		sy match  CtrlPTagPath       skipwhite '\t[^\t]\+'ms=s+1        nextgroup=CtrlPTagLine,CtrlPTagFind contains=CtrlPTagDir
-		sy match  CtrlPTagDir        contained '/\?\([^/\\\t]\+[/\\]\)*'
-		sy match  CtrlPTagLine       contained '\t\d\+'ms=s+1           nextgroup=CtrlPTagComment
-		sy region CtrlPTagFind       concealends matchgroup=Ignore start='\t/^\?'ms=s+1 skip='\(\\\\\)*\\/' end='\$\?/'
-		                                                              \ nextgroup=CtrlPTagComment contains=CtrlPTagSlash
-		sy match  CtrlPTagSlash      contained '\\[/\\^$]'he=s+1 conceal
-		sy region CtrlPTagComment    concealends matchgroup=Ignore oneline start=';"' excludenl end='$'
-		                                                              \ contains=CtrlPTagKind,CtrlPTagField
-		sy match  CtrlPTagKind       contained '\t[a-zA-Z]\>'ms=s+1
-		sy match  CtrlPTagField      contained '\t[a-z]*:[^\t]*'ms=s+1  contains=CtrlPTagContent
-		sy match  CtrlPTagContent    contained ':[^\t]*'ms=s+1
+		sy match  CtrlPTagPrompt     display           nextgroup=CtrlPTagKind                                 '^>'
+		sy match  CtrlPTagKind       display skipwhite nextgroup=CtrlPTagName	                                ' \S'
+		sy match  CtrlPTagName       display skipwhite nextgroup=CtrlPTagFieldList                            '\t[^\t]\+'hs=s+1
+		sy match  CtrlPTagFieldList  display skipwhite contains=CtrlPTagField,CtrlPTagFieldSep,CtrlPTagContent nextgroup=CtrlPTagPath '\t\([^,\t]\+\(, [^,\t]\+\)*\)\?'
+		sy match  CtrlPTagField      display skipwhite contains=CtrlPTagContent nextgroup=CtrlPTagFieldSep contained '\s[^,\t]*\ze'
+		sy match  CtrlPTagContent    display skipwhite nextgroup=CtrlPTagPath,CtrlPTagField contained         ':[^,\t]*'ms=s+1
+		sy match  CtrlPTagFieldSep   display skipwhite nextgroup=CtrlPTagField contained                      ','
+		sy match  CtrlPTagPath       display skipwhite nextgroup=CtrlPTagLine                                 '\t[^\t]\+'
+		sy match  CtrlPTagLine       display skipwhite contains=CtrlPTagSearch                                '\t.*$'hs=s+1
+
+		sy region CtrlPTagSearch     display skipwhite contains=CtrlPTagSlash matchgroup=Ignore start='/^\?' end='\$\?/$' concealends
+		sy match  CtrlPTagSlash      display skipwhite contained '\\[/\\^$]'he=s+1 conceal
 	en
 endf
 " Public {{{1
@@ -154,12 +175,8 @@ endf
 fu! ctrlp#tag#accept(mode, str)
 	cal ctrlp#exit()
 	" parse string
-	let tagend = stridx(a:str, "\t")
-	let fileend = stridx(a:str, "\t", tagend + 1)
-	let addrend = match(a:str, ';"\(\t\|$\)', fileend + 1)
-	let tag = a:str[:tagend - 1]
-	let file = a:str[tagend + 1:fileend - 1]
-	let addr = a:str[fileend + 1:addrend - 1]
+	let [tag, info, file; addr] = split(a:str[2:], "\t", 1)
+	let addr =  join(addr, "\t")
 
 	" find tag in list to call :[count]tag
 	let candidate = s:findcount(tag, file, addr)
