@@ -563,8 +563,7 @@ fu! s:MatchIt(items, pat, limit, exc)
 	for item in a:items
 		let id += 1
 		try
-			if (s:matchcrfile || !( s:ispath && item ==# a:exc )) &&
-						\call(s:mfunc, [item, pat]) >= 0
+			if (s:matchcrfile || !( s:ispath && item ==# a:exc )) && s:mfunc(item, pat) >= 0
 				cal add(lines, item)
 			en
 		cat | brea | endt
@@ -588,11 +587,11 @@ fu! s:MatchedItems(items, pat, limit)
 			\ 'items':  items,
 			\ 'str':    a:pat,
 			\ 'limit':  a:limit,
-			\ 'mmode':  s:mmode(),
+			\ 'mmode':  s:mmode,
 			\ 'ispath': s:ispath,
 			\ 'crfile': exc,
 			\ 'regex':  s:regexp,
-			\ }] : [items, a:pat, a:limit, s:mmode(), s:ispath, exc, s:regexp]
+			\ }] : [items, a:pat, a:limit, s:mmode, s:ispath, exc, s:regexp]
 		let lines = call(matcher['match'], argms, matcher)
 	el
 		let lines = s:MatchIt(items, a:pat, a:limit, exc)
@@ -1048,7 +1047,7 @@ endf
 fu! s:ToggleByFname()
 	if s:ispath
 		let s:byfname = !s:byfname
-		let s:mfunc = s:mfunc()
+		let [s:mfunc, s:mmode] = s:mfuncmode()
 		cal s:PrtSwitcher()
 	en
 endf
@@ -2190,7 +2189,7 @@ endf
 fu! s:modevar()
 	let s:matchtype = s:mtype()
 	let s:ispath = s:ispathitem()
-	let s:mfunc = s:mfunc()
+	let [s:mfunc, s:mmode] = s:mfuncmode()
 	let s:nolim = s:getextvar('nolim')
 	let s:dosort = s:getextvar('sort')
 	let s:spi = !s:itemtype || s:getextvar('specinput') > 0
@@ -2417,6 +2416,10 @@ fu! s:matchtabe(item, pat)
 	retu match(split(a:item, '\t\+[^\t]\+$')[0], a:pat)
 endf
 
+fu! s:matchtabn(n, item, pat)
+	retu match(split(a:item, '\t', 1)[a:n], a:pat)
+endf
+
 fu! s:buildpat(lst)
 	let pat = a:lst[0]
 	if s:matchnatural == 1
@@ -2436,31 +2439,26 @@ fu! s:curtype()
 	return s:CurTypeName()[1]
 endf
 
-fu! s:mfunc()
-	let mfunc = 'match'
+fu! s:mfuncmode()
 	if s:byfname()
-		let mfunc = 's:matchfname'
+		retu [function('s:matchfname'), 'filename-only']
 	elsei s:curtype() == 'buf'
-		let mfunc = 's:matchbuf'
+		retu [function('s:matchbuf'),  'full-line']
 	elsei s:itemtype >= len(s:coretypes)
-		let matchtypes = { 'tabs': 's:matchtabs', 'tabe': 's:matchtabe' }
+		let matchtypes = {
+				\ 'tabs': [function('s:matchtabs'), 'first-non-tab'],
+				\ 'tabe': [function('s:matchtabe'), 'until-last-tab']
+				\ }
 		if has_key(matchtypes, s:matchtype)
-			let mfunc = matchtypes[s:matchtype]
+			retu matchtypes[s:matchtype]
+		elsei s:matchtype[:2] == 'tab' && s:matchtype[3:] =~ '^-\?\d\+$'
+			let n = str2nr(s:matchtype[3:])
+			retu [function('s:matchtabn', [n]), printf('tab-sep-%d', n)]
 		en
 	en
-	retu mfunc
+	retu [function('match'), 'full-line']
 endf
 
-fu! s:mmode()
-	let matchmodes = {
-		\ 'match': 'full-line',
-		\ 's:matchfname': 'filename-only',
-		\ 's:matchbuf': 'full-line',
-		\ 's:matchtabs': 'first-non-tab',
-		\ 's:matchtabe': 'until-last-tab',
-		\ }
-	retu matchmodes[s:mfunc]
-endf
 " Cache {{{2
 fu! s:writecache(cafile)
 	if ( g:ctrlp_newcache || !filereadable(a:cafile) ) && !s:nocache()
