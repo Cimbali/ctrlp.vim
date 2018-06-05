@@ -104,6 +104,12 @@ fu! s:filter(tags)
 	retu a:tags
 endf
 
+fu! s:formattag(line, tagdir)
+	" parse string
+	let [tag, filename; command] = split(a:line, "\t")
+	retu join([tag, fnamemodify((filename[0] != '/' ? a:tagdir . '/' : '') . filename, ':p:~:.')] + command, "\t")
+endf
+
 fu! s:syntax()
 	if !ctrlp#nosy()
 		cal ctrlp#hicheck('CtrlPTagComment',  'Comment')
@@ -138,7 +144,8 @@ fu! ctrlp#tag#init()
 	let tagfiles = sort(filter(s:tagfiles, 'count(s:tagfiles, v:val) == 1'))
 	for each in tagfiles
 		let alltags = s:filter(ctrlp#utils#readfile(each))
-		cal extend(g:ctrlp_alltags, alltags)
+		let dir = &tr ? fnamemodify(each, ':p:h') : getcwd()
+		cal extend(g:ctrlp_alltags, map(alltags, 's:formattag(v:val, "'.dir.'")'))
 	endfo
 	cal s:syntax()
 	retu g:ctrlp_alltags
