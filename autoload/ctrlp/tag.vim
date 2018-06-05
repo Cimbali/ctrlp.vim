@@ -164,25 +164,38 @@ fu! ctrlp#tag#accept(mode, str)
 
 	" Open target window/buffer according to mode.
 	" lhs splits then we call :tag, rhs does tjump
-	let cmds = {
-		\ 't': [ctrlp#tabcount() . 'tab sp', ctrlp#tabcount() . 'tab stj'],
-		\ 'h': ['sp', 'stj'],
-		\ 'v': ['vs', 'vert stj'],
-		\ 'e': ['', 'tj'],
+	let cmd = {
+		\ 't': ctrlp#tabcount() . 'tab sp',
+		\ 'h': 'sp',
+		\ 'v': 'vs',
+		\ 'e': '',
 		\ }[a:mode]
 
 	" Go to the tag found with the filtering, if any
 	if candidate > 0
-		if cmds[0] != ''
-			exe cmds[0]
+		if cmd != ''
+			exe cmd
 		en
 
 		let save_cst = &cst
 		set nocst
-		exe candidate.'ta '.tag
-		let &cst = save_cst
-	el
-		exe cmds[1].' '.tag
+		try
+			exe candidate.'ta '.tag
+		cat
+			" Sometimes, the taglist() returns tags that none of :ta :tj :ts can find
+			" (even though this typically indicates the tag file is out of date)
+			let candidate = 0
+		fina
+			let &cst = save_cst
+		endt
+	en
+
+	if candidate <= 0
+		" Fall back to just opening the file and going to the line as specified by
+		" the tag that we found. Does not add the tag to the taglist, so mark context.
+		mark '
+		exe (cmd != '' ? cmd : 'e').' '.file
+		san addr
 	en
 
 	" unfold + center
